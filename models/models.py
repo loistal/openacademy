@@ -1,4 +1,4 @@
-from openerp import models, fields, api
+from openerp import models, fields, api, exceptions
 
 class Course(models.Model):
     _name = 'openacademy.course'
@@ -10,6 +10,31 @@ class Course(models.Model):
         ondelete='set null', string="Responsible", index=True)
     session_ids = fields.One2many(
         'openacademy.session', 'course_id', string="Sessions")
+
+    @api.multi
+    def copy(self, default=None):
+        default = dict(default or {})
+
+        copied_count = self.search_count(
+            [('name', '=like', u"Copy of {}%".format(self.name))])
+        if not copied_count:
+            new_name = u"Copy of {}".format(self.name)
+        else:
+            new_name = u"Copy of {} ({})".format(self.name, copied_count)
+
+        default['name'] = new_name
+        return super(Course, self).copy(default)
+
+
+    _sql_constraints = [
+        ('name_description_check',
+         'CHECK(name != description)',
+         "The title of the course should not be the description"),
+
+        ('name_unique',
+         'UNIQUE(name)',
+         "The course title must be unique"),
+    ]    
 
 class Session(models.Model):
     _name = 'openacademy.session'
@@ -27,6 +52,24 @@ class Session(models.Model):
     attendee_ids = fields.Many2many('res.partner', string="Attendees")
 
     taken_seats = fields.Float(string="Taken seats", compute='_taken_seats')
+
+    state = fields.Selection([
+        ('draft', "Draft"),
+        ('confirmed', "Confirmed"),
+        ('done', "Done"),
+    ])
+
+    @api.multi
+    def action_draft(self):
+        self.state = 'draft'
+
+    @api.multi
+    def action_confirm(self):
+        self.state = 'confirmed'
+
+    @api.multi
+    def action_done(self):
+        self.state = 'done'
 
     @api.depends('seats', 'attendee_ids')
     def _taken_seats(self):
@@ -53,6 +96,11 @@ class Session(models.Model):
                 },
             }
 
+    @api.constrains('instructor_id', 'attendee_ids')
+    def _check_instructor_not_in_attendees(self):
+        for r in self:
+            if r.instructor_id and r.instructor_id in r.attendee_ids:
+                raise exceptions.ValidationError("A session's instructor can't be an attendee")
 
 
 
